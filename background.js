@@ -10,6 +10,33 @@ const HUMAN_STEP_DELAY_MAX = 2200;
 
 initializeSessionStorageAccess();
 
+let automationWindowId = null;
+
+async function ensureAutomationWindowId() {
+  if (automationWindowId != null) {
+    try {
+      await chrome.windows.get(automationWindowId);
+      return automationWindowId;
+    } catch {
+      automationWindowId = null;
+    }
+  }
+  const registry = await getTabRegistry();
+  for (const entry of Object.values(registry)) {
+    if (entry.tabId) {
+      try {
+        const tab = await chrome.tabs.get(entry.tabId);
+        automationWindowId = tab.windowId;
+        return automationWindowId;
+      } catch {}
+    }
+  }
+  const win = await chrome.windows.getLastFocused();
+  automationWindowId = win.id;
+  return automationWindowId;
+}
+
+
 // ============================================================
 // State Management (chrome.storage.session)
 // ============================================================
@@ -307,8 +334,9 @@ async function reuseOrCreateTab(source, url, options = {}) {
     return tabId;
   }
 
-  // Create new tab
-  const tab = await chrome.tabs.create({ url, active: true });
+  // Create new tab in the automation window
+  const wid = await ensureAutomationWindowId();
+  const tab = await chrome.tabs.create({ url, active: true, windowId: wid });
   console.log(LOG_PREFIX, `Created new tab ${source} (${tab.id})`);
 
   // If dynamic injection needed (VPS panel), inject scripts after load
@@ -1065,7 +1093,28 @@ function normalizeInbucketOrigin(rawValue) {
   }
 }
 
+async function clickResendOnSignupPage(step) {
+  const signupTabId = await getTabId('signup-page');
+  if (!signupTabId) return;
+
+  await chrome.tabs.update(signupTabId, { active: true });
+  await sleepWithStop(500);
+
+  try {
+    await sendToContentScript('signup-page', {
+      type: 'CLICK_RESEND_EMAIL',
+      step,
+      source: 'background',
+    });
+  } catch (err) {
+    await addLog(`Step ${step}: Resend click skipped: ${err.message}`, 'warn');
+  }
+}
+
 async function executeStep4(state) {
+  // Click "重新发送电子邮件" on the signup page before polling
+  await clickResendOnSignupPage(4);
+
   const mail = getMailConfig(state);
   if (mail.error) throw new Error(mail.error);
   await addLog(`Step 4: Opening ${mail.label}...`);
@@ -1175,6 +1224,9 @@ async function executeStep6(state) {
 // ============================================================
 
 async function executeStep7(state) {
+  // Click "重新发送电子邮件" on the auth page before polling
+  await clickResendOnSignupPage(7);
+
   const mail = getMailConfig(state);
   if (mail.error) throw new Error(mail.error);
   await addLog(`Step 7: Opening ${mail.label}...`);
@@ -1245,47 +1297,67 @@ async function executeStep8(state) {
     throw new Error('No OAuth URL. Complete step 1 first.');
   }
 
+  // Check if the signup tab already redirected to localhost before listener setup
+  const signupTabIdEarly = await getTabId('signup-page');
+  if (signupTabIdEarly) {
+    try {
+      const tab = await chrome.tabs.get(signupTabIdEarly);
+      if (tab.url && (tab.url.startsWith('http://localhost') || tab.url.startsWith('http://127.0.0.1'))) {
+        await addLog(`Step 8: Localhost redirect already captured: ${tab.url}`, 'ok');
+        await setState({ localhostUrl: tab.url });
+        broadcastDataUpdate({ localhostUrl: tab.url });
+        return;
+      }
+    } catch {}
+  }
+
   await addLog('Step 8: Setting up localhost redirect listener...');
 
   // Register webNavigation listener (scoped to this step)
   return new Promise((resolve, reject) => {
     let resolved = false;
-    let resolveCaptureWait = null;
-    const captureWait = new Promise((resolveCapture) => {
-      resolveCaptureWait = resolveCapture;
-    });
 
-    const cleanupListener = () => {
+    const isLocalhostUrl = (url) =>
+      url && (url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1'));
+
+    const cleanupListeners = () => {
       if (webNavListener) {
         chrome.webNavigation.onBeforeNavigate.removeListener(webNavListener);
+        chrome.webNavigation.onCommitted.removeListener(webNavListener);
+        chrome.webNavigation.onErrorOccurred.removeListener(webNavListener);
         webNavListener = null;
       }
     };
 
+    const captureLocalhostUrl = (url) => {
+      if (resolved) return;
+      resolved = true;
+      cleanupListeners();
+      clearTimeout(timeout);
+      setState({ localhostUrl: url }).then(() => {
+        addLog(`Step 8: Captured localhost URL: ${url}`, 'ok');
+        setStepStatus(8, 'completed');
+        notifyStepComplete(8, { localhostUrl: url });
+        broadcastDataUpdate({ localhostUrl: url });
+        resolve();
+      });
+    };
+
     const timeout = setTimeout(() => {
-      cleanupListener();
+      cleanupListeners();
       reject(new Error('Localhost redirect not captured after 120s. Step 8 click may have been blocked.'));
     }, 120000);
 
     webNavListener = (details) => {
-      if (details.url.startsWith('http://localhost')) {
+      if (details.frameId === 0 && isLocalhostUrl(details.url)) {
         console.log(LOG_PREFIX, `Captured localhost redirect: ${details.url}`);
-        resolved = true;
-        cleanupListener();
-        clearTimeout(timeout);
-        if (resolveCaptureWait) resolveCaptureWait(details.url);
-
-        setState({ localhostUrl: details.url }).then(() => {
-          addLog(`Step 8: Captured localhost URL: ${details.url}`, 'ok');
-          setStepStatus(8, 'completed');
-          notifyStepComplete(8, { localhostUrl: details.url });
-          broadcastDataUpdate({ localhostUrl: details.url });
-          resolve();
-        });
+        captureLocalhostUrl(details.url);
       }
     };
 
     chrome.webNavigation.onBeforeNavigate.addListener(webNavListener);
+    chrome.webNavigation.onCommitted.addListener(webNavListener);
+    chrome.webNavigation.onErrorOccurred.addListener(webNavListener);
 
     // After step 7, the auth page shows a consent screen ("使用 ChatGPT 登录到 Codex")
     // with a "继续" button. We locate the button in-page, then click it through
@@ -1314,10 +1386,22 @@ async function executeStep8(state) {
         if (!resolved) {
           await clickWithDebugger(signupTabId, clickResult?.rect);
           await addLog('Step 8: Debugger click dispatched, waiting for redirect...');
+
+          // Fallback: poll tab URL in case webNavigation listeners missed the redirect
+          for (let i = 0; i < 30 && !resolved; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              const tab = await chrome.tabs.get(signupTabId);
+              if (isLocalhostUrl(tab.url)) {
+                captureLocalhostUrl(tab.url);
+                break;
+              }
+            } catch { break; }
+          }
         }
       } catch (err) {
         clearTimeout(timeout);
-        cleanupListener();
+        cleanupListeners();
         reject(err);
       }
     })();
@@ -1342,8 +1426,9 @@ async function executeStep9(state) {
   const alive = tabId && await isTabAlive('vps-panel');
 
   if (!alive) {
-    // Create new tab
-    const tab = await chrome.tabs.create({ url: state.vpsUrl, active: true });
+    // Create new tab in the automation window
+    const wid = await ensureAutomationWindowId();
+    const tab = await chrome.tabs.create({ url: state.vpsUrl, active: true, windowId: wid });
     tabId = tab.id;
     await new Promise(resolve => {
       const listener = (tid, info) => {

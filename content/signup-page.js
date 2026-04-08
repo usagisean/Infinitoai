@@ -5,7 +5,7 @@ console.log('[MultiPage:signup-page] Content script loaded on', location.href);
 
 // Listen for commands from Background
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'EXECUTE_STEP' || message.type === 'FILL_CODE' || message.type === 'STEP8_FIND_AND_CLICK') {
+  if (message.type === 'EXECUTE_STEP' || message.type === 'FILL_CODE' || message.type === 'STEP8_FIND_AND_CLICK' || message.type === 'CLICK_RESEND_EMAIL') {
     resetStopState();
     handleCommand(message).then((result) => {
       sendResponse({ ok: true, ...(result || {}) });
@@ -43,6 +43,8 @@ async function handleCommand(message) {
     case 'FILL_CODE':
       // Step 4 = signup code, Step 7 = login code (same handler)
       return await fillVerificationCode(message.step, message.payload);
+    case 'CLICK_RESEND_EMAIL':
+      return await clickResendEmail(message.step);
     case 'STEP8_FIND_AND_CLICK':
       return await step8_findAndClick();
   }
@@ -147,6 +149,38 @@ async function step3_fillEmailPassword(payload) {
     simulateClick(submitBtn);
     log('Step 3: Form submitted');
   }
+}
+
+// ============================================================
+// Click "重新发送电子邮件" (used before step 4 and step 7 polling)
+// ============================================================
+
+async function clickResendEmail(step) {
+  log(`Step ${step}: Looking for "重新发送电子邮件" button...`);
+
+  let resendBtn = null;
+  try {
+    resendBtn = await waitForElementByText(
+      'a, button, [role="button"], [role="link"], span',
+      /重新发送电子邮件|resend\s*email/i,
+      10000
+    );
+  } catch {
+    log(`Step ${step}: "重新发送电子邮件" button not found, skipping`, 'warn');
+    return;
+  }
+
+  // Prevent parent form POST submission (Remix/React Router route without action)
+  const parentForm = resendBtn.closest('form');
+  const blockSubmit = (e) => e.preventDefault();
+  if (parentForm) parentForm.addEventListener('submit', blockSubmit, { once: true });
+
+  await humanPause(400, 1000);
+  resendBtn.click();
+  log(`Step ${step}: Clicked "重新发送电子邮件"`, 'ok');
+  await sleep(2000);
+
+  if (parentForm) parentForm.removeEventListener('submit', blockSubmit);
 }
 
 // ============================================================
@@ -260,32 +294,15 @@ async function step6_login(payload) {
   reportComplete(6, { needsOTP: true });
 }
 
-async function waitForLoginPasswordField(timeout = 15000) {
+async function waitForLoginPasswordField(timeout = 25000) {
   const start = Date.now();
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
 
-    const passwordInput = document.querySelector('input[type="password"]');
+    const passwordInput = findVisiblePasswordInput();
     if (passwordInput) {
       return passwordInput;
-    }
-
-    // Some flows skip the password screen and go straight to OTP or consent.
-    const otpInput = document.querySelector(
-      'input[name="code"], input[name="otp"], input[type="text"][maxlength="6"], input[inputmode="numeric"], input[maxlength="1"]'
-    );
-    if (otpInput) {
-      log('Step 6: Verification code input appeared before password field.');
-      return null;
-    }
-
-    const consentButton = document.querySelector(
-      'button[type="submit"][data-dd-action-name="Continue"], button[type="submit"]._primary_3rdp0_107'
-    );
-    if (consentButton) {
-      log('Step 6: Consent page appeared before password field.');
-      return null;
     }
 
     await sleep(250);
@@ -293,6 +310,26 @@ async function waitForLoginPasswordField(timeout = 15000) {
 
   log(`Step 6: Password field did not appear within ${Math.round(timeout / 1000)}s.`, 'warn');
   return null;
+}
+
+function findVisiblePasswordInput() {
+  const inputs = document.querySelectorAll('input[type="password"]');
+  for (const input of inputs) {
+    if (isElementVisible(input)) {
+      return input;
+    }
+  }
+  return null;
+}
+
+function isElementVisible(el) {
+  if (!el) return false;
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
 }
 
 // ============================================================

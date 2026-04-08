@@ -69,6 +69,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Find mail items
 // ============================================================
 
+function parseEmailDate(item) {
+  const aria = item.getAttribute('aria-label') || '';
+  const m = aria.match(/(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})[日]?\s*(\d{1,2}):(\d{2})/);
+  if (m) return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]).getTime();
+  const d = aria.match(/(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})/);
+  if (d) return new Date(+d[1], d[2] - 1, +d[3]).getTime();
+  return 0;
+}
+
 function findMailItems() {
   return document.querySelectorAll('div[sign="letter"]');
 }
@@ -87,7 +96,7 @@ function getCurrentMailIds() {
 // ============================================================
 
 async function handlePollEmail(step, payload) {
-  const { senderFilters, subjectFilters, maxAttempts, intervalMs } = payload;
+  const { senderFilters, subjectFilters, maxAttempts, intervalMs, filterAfterTimestamp = 0 } = payload;
 
   log(`Step ${step}: Starting email poll on 163 Mail (max ${maxAttempts} attempts)`);
 
@@ -101,28 +110,16 @@ async function handlePollEmail(step, payload) {
     log(`Step ${step}: Inbox link not found, proceeding...`, 'warn');
   }
 
-  // Wait for mail list to appear
+  // Wait for mail list container to appear (page loaded check, inbox can be empty)
   log(`Step ${step}: Waiting for mail list...`);
-  let items = [];
-  for (let i = 0; i < 20; i++) {
-    items = findMailItems();
-    if (items.length > 0) break;
-    await sleep(500);
+  try {
+    await waitForElement('.nui-tree-item-text[title="收件箱"], .mail-list, div[sign="letter"]', 10000);
+    log(`Step ${step}: Mail page loaded`);
+  } catch {
+    log(`Step ${step}: Mail page may not be fully loaded, proceeding to poll anyway...`, 'warn');
   }
 
-  if (items.length === 0) {
-    await refreshInbox();
-    await sleep(2000);
-    items = findMailItems();
-  }
-
-  if (items.length === 0) {
-    throw new Error('163 Mail list did not load. Make sure inbox is open.');
-  }
-
-  log(`Step ${step}: Mail list loaded, ${items.length} items`);
-
-  // Snapshot existing mail IDs
+  // Snapshot existing mail IDs (may be empty if inbox is empty)
   const existingMailIds = getCurrentMailIds();
   log(`Step ${step}: Snapshotted ${existingMailIds.size} existing emails`);
 
@@ -131,10 +128,8 @@ async function handlePollEmail(step, payload) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     log(`Polling 163 Mail... attempt ${attempt}/${maxAttempts}`);
 
-    if (attempt > 1) {
-      await refreshInbox();
-      await sleep(1000);
-    }
+    await refreshInbox();
+    await sleep(1000);
 
     const allItems = findMailItems();
     const useFallback = attempt > FALLBACK_AFTER;
@@ -154,6 +149,14 @@ async function handlePollEmail(step, payload) {
 
       const senderMatch = senderFilters.some(f => sender.includes(f.toLowerCase()) || ariaLabel.includes(f.toLowerCase()));
       const subjectMatch = subjectFilters.some(f => subject.toLowerCase().includes(f.toLowerCase()) || ariaLabel.includes(f.toLowerCase()));
+
+      if ((senderMatch || subjectMatch) && filterAfterTimestamp > 0) {
+        const emailTime = parseEmailDate(item);
+        if (emailTime > 0 && emailTime < filterAfterTimestamp - 60000) {
+          log(`Step ${step}: Skipping old email (date: ${new Date(emailTime).toLocaleString()})`, 'info');
+          continue;
+        }
+      }
 
       if (senderMatch || subjectMatch) {
         const code = extractVerificationCode(subject + ' ' + ariaLabel);
