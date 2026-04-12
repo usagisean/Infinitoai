@@ -159,9 +159,39 @@ test('mergeTmailorDomainStates keeps packaged seeds while letting runtime state 
   assert.deepEqual(merged.stats['runtime-only.com'], { successCount: 2, failureCount: 0 });
 });
 
+test('mergeTmailorDomainStates lets the packaged blacklist evict stale persisted whitelist entries', () => {
+  const merged = mergeTmailorDomainStates(
+    {
+      mode: 'com_only',
+      whitelist: ['seeded-good.com'],
+      blacklist: ['pippoc.com'],
+      stats: {
+        'pippoc.com': { successCount: 0, failureCount: 1 },
+      },
+    },
+    {
+      mode: 'whitelist_only',
+      whitelist: ['pippoc.com', 'runtime-only.com'],
+      blacklist: [],
+      stats: {
+        'runtime-only.com': { successCount: 2, failureCount: 0 },
+      },
+    }
+  );
+
+  assert.equal(merged.whitelist.includes('seeded-good.com'), true);
+  assert.equal(merged.whitelist.includes('runtime-only.com'), true);
+  assert.equal(merged.whitelist.includes('pippoc.com'), false);
+  assert.equal(merged.blacklist.includes('pippoc.com'), true);
+});
+
 test('default tmailor state exposes the initial whitelist', () => {
   assert.equal(DEFAULT_TMAILOR_WHITELIST.length > 5, true);
   assert.equal(DEFAULT_TMAILOR_DOMAIN_MODE, 'com_only');
   assert.equal(DEFAULT_TMAILOR_DOMAIN_STATE.whitelist.includes('mikfarm.com'), true);
+  assert.equal(DEFAULT_TMAILOR_DOMAIN_STATE.whitelist.includes('hetzez.com'), false);
+  assert.equal(DEFAULT_TMAILOR_DOMAIN_STATE.whitelist.includes('pippoc.com'), false);
+  assert.equal(DEFAULT_TMAILOR_DOMAIN_STATE.blacklist.includes('hetzez.com'), true);
+  assert.equal(DEFAULT_TMAILOR_DOMAIN_STATE.blacklist.includes('pippoc.com'), true);
   assert.equal(DEFAULT_TMAILOR_DOMAIN_STATE.mode, 'com_only');
 });

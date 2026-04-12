@@ -73,15 +73,15 @@
         'coffeejadore.com',
         'accclone.com',
         'emailcoffeehouse.com',
-        'pippoc.com',
-        'hetzez.com',
         'nickmxh.com',
       ],
       blacklist: [
         'benphim.com',
         'groklan.com',
         'haibabon.com',
+        'hetzez.com',
         'img-free.com',
+        'pippoc.com',
         'phimib.com',
         'storebanme.com',
         'topdatamaster.com',
@@ -91,7 +91,9 @@
         'benphim.com': { successCount: 0, failureCount: 1 },
         'groklan.com': { successCount: 0, failureCount: 1 },
         'haibabon.com': { successCount: 0, failureCount: 1 },
+        'hetzez.com': { successCount: 0, failureCount: 1 },
         'img-free.com': { successCount: 0, failureCount: 1 },
+        'pippoc.com': { successCount: 0, failureCount: 1 },
         'phimib.com': { successCount: 0, failureCount: 1 },
         'storebanme.com': { successCount: 0, failureCount: 1 },
         'topdatamaster.com': { successCount: 0, failureCount: 1 },
@@ -259,6 +261,9 @@
         ...cloneStats(normalizedState.stats),
       };
     }
+
+    const mergedBlacklistSet = new Set(mergedBlacklist);
+    mergedWhitelist = mergedWhitelist.filter((domain) => !mergedBlacklistSet.has(domain));
 
     return normalizeTmailorDomainState({
       mode: mergedMode,
