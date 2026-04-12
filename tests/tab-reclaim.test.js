@@ -5,6 +5,7 @@ const {
   buildReclaimableTabRegistry,
   normalizeOrigin,
   normalizeComparableUrl,
+  shouldPrepareSameUrlTabForReuse,
 } = require('../shared/tab-reclaim.js');
 
 test('buildReclaimableTabRegistry recognizes restored tabs for known sources', () => {
@@ -79,5 +80,36 @@ test('normalizeOrigin and normalizeComparableUrl tolerate missing protocols and 
   assert.equal(
     normalizeComparableUrl('https://panel.example.com/path?q=1#hash'),
     'https://panel.example.com/path?q=1'
+  );
+});
+
+test('same-url reuse reclaims tabs whose content script readiness was lost', () => {
+  assert.equal(
+    shouldPrepareSameUrlTabForReuse(
+      { tabId: 14, ready: false },
+      {}
+    ),
+    true
+  );
+  assert.equal(
+    shouldPrepareSameUrlTabForReuse(
+      { tabId: 14, ready: true },
+      {}
+    ),
+    false
+  );
+  assert.equal(
+    shouldPrepareSameUrlTabForReuse(
+      { tabId: 14, ready: false },
+      { reloadIfSameUrl: true }
+    ),
+    false
+  );
+  assert.equal(
+    shouldPrepareSameUrlTabForReuse(
+      { tabId: 14, ready: false },
+      { inject: ['content/tmailor-mail.js'] }
+    ),
+    false
   );
 });

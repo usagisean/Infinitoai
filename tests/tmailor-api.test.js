@@ -23,6 +23,7 @@ function createJsonResponse(body, status = 200) {
 
 test('fetchAllowedTmailorEmail keeps requesting new mailboxes until the domain passes current rules', async () => {
   const calls = [];
+  const attemptEvents = [];
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url, options });
 
@@ -50,12 +51,23 @@ test('fetchAllowedTmailorEmail keeps requesting new mailboxes until the domain p
       blacklist: ['blocked.com'],
     }),
     maxAttempts: 3,
+    onAttempt: async (event) => {
+      attemptEvents.push(event);
+    },
   });
 
   assert.equal(result.email, 'third@fresh-allowed.com');
   assert.equal(result.domain, 'fresh-allowed.com');
   assert.equal(result.accessToken, 'token-3');
   assert.equal(calls.filter((entry) => entry.options?.method === 'POST').length, 3);
+  assert.deepEqual(
+    attemptEvents.map((event) => ({ attempt: event.attempt, maxAttempts: event.maxAttempts })),
+    [
+      { attempt: 1, maxAttempts: 3 },
+      { attempt: 2, maxAttempts: 3 },
+      { attempt: 3, maxAttempts: 3 },
+    ]
+  );
 });
 
 test('pollTmailorVerificationCode returns the fresh ChatGPT code directly from inbox data', async () => {

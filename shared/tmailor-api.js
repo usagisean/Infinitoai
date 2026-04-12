@@ -68,7 +68,7 @@
   };
 
   const getTmailorApiManualTakeoverMessage = TmailorErrors?.getTmailorApiManualTakeoverMessage || function() {
-    return 'TMailor API triggered a Cloudflare captcha. Please open the TMailor page, complete the checkbox and Confirm manually, then continue.';
+    return 'TMailor API triggered a Cloudflare captcha.';
   };
 
   const getStepMailMatchProfile = MailMatching?.getStepMailMatchProfile || function() {
@@ -404,6 +404,13 @@
     });
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (typeof config.onAttempt === 'function') {
+        await config.onAttempt({
+          attempt,
+          maxAttempts,
+        });
+      }
+
       const data = await callTmailorApi({
         action: 'newemail',
         payload: {

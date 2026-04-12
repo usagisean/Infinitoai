@@ -32,7 +32,7 @@ const { DEFAULT_EMAIL_SOURCE, generate33MailAddress, get33MailDomainForProvider,
 const { chooseMailProviderForAutoRun, getConfiguredRotatableMailProviders, getNextMailProviderAvailabilityTimestamp, isRotatableMailProvider, pruneMailProviderUsage, recordMailProviderUsage } = MailProviderRotation;
 const { DEFAULT_TMAILOR_DOMAIN_STATE, extractEmailDomain, isAllowedTmailorDomain, mergeTmailorDomainStates, normalizeTmailorDomainState, recordTmailorDomainFailure, recordTmailorDomainSuccess, shouldBlacklistTmailorDomainForError } = TmailorDomains;
 const { checkTmailorApiConnectivity, fetchAllowedTmailorEmail, pollTmailorVerificationCode } = TmailorApi;
-const { buildReclaimableTabRegistry } = TabReclaim;
+const { buildReclaimableTabRegistry, shouldPrepareSameUrlTabForReuse } = TabReclaim;
 const {
   DEFAULT_AUTO_RUN_COUNT,
   DEFAULT_AUTO_RUN_INFINITE,
@@ -621,6 +621,7 @@ async function reuseOrCreateTab(source, url, options = {}) {
 
     const registry = await getTabRegistry();
     if (sameUrl) {
+      const entry = registry[source] || null;
       await chrome.tabs.update(tabId, { active: true });
       console.log(LOG_PREFIX, `Reused tab ${source} (${tabId}) on same URL`);
 
@@ -660,6 +661,13 @@ async function reuseOrCreateTab(source, url, options = {}) {
           files: options.inject,
         });
         await new Promise(r => setTimeout(r, 500));
+      }
+
+      if (shouldPrepareSameUrlTabForReuse(entry, options)) {
+        const ready = await prepareReclaimedTab(source, tabId);
+        registry[source] = { tabId, ready };
+        await setState({ tabRegistry: registry });
+        console.log(LOG_PREFIX, `Revalidated same-URL tab ${source} (${tabId}) after reuse (ready=${ready})`);
       }
 
       return tabId;
@@ -1677,6 +1685,12 @@ async function fetchTmailorEmail(options = {}) {
       await addLog('TMailor: Requesting a new mailbox via API...', 'info');
       const result = await fetchAllowedTmailorEmail({
         domainState: state.tmailorDomainState,
+        onAttempt: async (event) => {
+          await addLog(
+            `TMailor API: Refreshing mailbox attempt ${event.attempt}/${event.maxAttempts}...`,
+            'info'
+          );
+        },
       });
       await setTmailorMailboxState(result.email, result.accessToken);
       await addLog(`TMailor API: Mailbox ready ${result.email} (token saved for API inbox polling).`, 'ok');

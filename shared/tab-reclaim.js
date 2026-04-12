@@ -126,10 +126,24 @@
     return registry;
   }
 
+  function shouldPrepareSameUrlTabForReuse(entry, options = {}) {
+    const hasDynamicInjection = Array.isArray(options?.inject)
+      ? options.inject.length > 0
+      : Boolean(options?.inject);
+
+    return Boolean(
+      entry
+      && entry.ready === false
+      && !options?.reloadIfSameUrl
+      && !hasDynamicInjection
+    );
+  }
+
   return {
     buildReclaimableTabRegistry,
     detectReclaimableSource,
     normalizeComparableUrl,
     normalizeOrigin,
+    shouldPrepareSameUrlTabForReuse,
   };
 });
