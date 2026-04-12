@@ -403,6 +403,7 @@ async function step6_login(payload) {
   if (!email) throw new Error('No email provided for login.');
 
   log(`Step 6: Logging in with ${email}...`);
+  const latestPageOauthUrl = await resolveLatestPageOauthUrl();
 
   // Wait for email input on the auth page
   let emailInput = null;
@@ -445,13 +446,47 @@ async function step6_login(payload) {
       log('Step 6: Submitted password, waiting for login outcome...');
     }
     await waitForLoginSubmissionOutcome();
-    reportComplete(6, { needsOTP: true });
+    reportComplete(6, { needsOTP: true, ...(latestPageOauthUrl ? { oauthUrl: latestPageOauthUrl } : {}) });
     return;
   }
 
   // No password field — OTP flow
   log('Step 6: No password field. OTP flow or auto-redirect.');
-  reportComplete(6, { needsOTP: true });
+  reportComplete(6, { needsOTP: true, ...(latestPageOauthUrl ? { oauthUrl: latestPageOauthUrl } : {}) });
+}
+
+async function resolveLatestPageOauthUrl() {
+  const pageOauthUrl = getPageOauthUrl();
+  if (!pageOauthUrl) {
+    return '';
+  }
+
+  try {
+    const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' });
+    const savedOauthUrl = String(state?.oauthUrl || '').trim();
+    if (!savedOauthUrl || savedOauthUrl !== pageOauthUrl) {
+      log(`Step 6: Detected newer OAuth URL on the page, using it instead of the saved panel value.`);
+      return pageOauthUrl;
+    }
+  } catch {}
+
+  return '';
+}
+
+function getPageOauthUrl() {
+  const anchors = Array.from(document.querySelectorAll('a[href*="/api/oauth/authorize"]'));
+  for (const anchor of anchors) {
+    if (!isElementVisible(anchor)) {
+      continue;
+    }
+
+    const href = String(anchor.href || anchor.getAttribute?.('href') || '').trim();
+    if (/^https?:\/\/[^/]+\/api\/oauth\/authorize/i.test(href)) {
+      return href;
+    }
+  }
+
+  return '';
 }
 
 async function waitForLoginPasswordField(timeout = 25000) {

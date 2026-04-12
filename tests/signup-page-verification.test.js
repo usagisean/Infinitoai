@@ -318,3 +318,96 @@ test('step 6 fails instead of completing when the login page shows incorrect ema
     },
   ]);
 });
+
+test('step 6 reports the latest page oauth url when it differs from the saved panel value', async () => {
+  const state = {
+    bodyText: '输入密码',
+    passwordVisible: false,
+  };
+
+  const emailInput = {
+    getBoundingClientRect() {
+      return { width: 120, height: 40 };
+    },
+  };
+
+  const oauthAnchor = {
+    href: 'https://auth.openai.com/api/oauth/authorize?client_id=page-newer',
+    textContent: 'Continue to OpenAI',
+    getBoundingClientRect() {
+      return { width: 160, height: 30 };
+    },
+  };
+
+  const runtimeMessages = [];
+
+  const context = createContext({
+    href: 'https://auth.openai.com/u/login/identifier',
+    bodyText: state.bodyText,
+    waitForElementImpl(selector) {
+      if (selector.includes('type="email"') || selector.includes('name="email"')) {
+        return Promise.resolve(emailInput);
+      }
+      return Promise.reject(new Error(`missing: ${selector}`));
+    },
+    querySelectorImpl(selector) {
+      if (selector === 'button[type="submit"]') {
+        return null;
+      }
+      if (selector === 'a[href*="/api/oauth/authorize"]') {
+        return oauthAnchor;
+      }
+      return null;
+    },
+    querySelectorAllImpl(selector) {
+      if (selector === 'input[type="password"]' && state.passwordVisible) {
+        return [{}];
+      }
+      if (selector === 'a[href*="/api/oauth/authorize"]') {
+        return [oauthAnchor];
+      }
+      return [];
+    },
+  });
+
+  context.chrome.runtime.sendMessage = (message) => {
+    runtimeMessages.push(message);
+    if (message?.type === 'GET_STATE') {
+      return Promise.resolve({ oauthUrl: 'https://auth.openai.com/api/oauth/authorize?client_id=panel-old' });
+    }
+    return Promise.resolve({ ok: true });
+  };
+  context.fillInput = () => {};
+  context.simulateClick = () => {};
+
+  loadSignupPage(context);
+
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected signup-page to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 6, payload: { email: 'demo@example.com', password: 'secret-pass' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 3000);
+  });
+
+  assert.equal(response?.ok, true);
+  assert.deepEqual(context.__errors, []);
+  assert.equal(context.__completions.length, 1);
+  assert.equal(context.__completions[0].step, 6);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.__completions[0].payload)),
+    {
+      needsOTP: true,
+      oauthUrl: 'https://auth.openai.com/api/oauth/authorize?client_id=page-newer',
+    }
+  );
+  assert.ok(
+    runtimeMessages.some((message) => message?.type === 'GET_STATE'),
+    'expected step 6 to read the saved oauth url before deciding whether to override it'
+  );
+});
