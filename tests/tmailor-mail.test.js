@@ -635,6 +635,50 @@ test('tmailor step 7 returns to the mailbox home page after opening the mail det
   assert.equal(state.historyBackCalls, 0);
 });
 
+test('tmailor step 7 returns home two seconds after the detail url appears', async () => {
+  const context = createContext();
+  const sleepCalls = [];
+  let detailOpened = false;
+
+  context.location.href = 'https://tmailor.com/';
+  context.document.querySelector = () => null;
+  context.document.querySelectorAll = () => [];
+  context.sleep = async (ms = 0) => {
+    sleepCalls.push(ms);
+    if (!detailOpened && sleepCalls.reduce((sum, value) => sum + value, 0) >= 1000) {
+      detailOpened = true;
+      context.location.href = 'https://tmailor.com/inbox?emailid=detail-delayed-home';
+    }
+  };
+
+  loadTmailorScript(context);
+
+  const hooks = context.__MULTIPAGE_TMAILOR_TEST_HOOKS;
+  assert.ok(hooks?.readCodeFromMailRow, 'expected tmailor test hooks to expose readCodeFromMailRow');
+
+  const row = {
+    combinedText: 'Your ChatGPT code is ******',
+    element: {
+      getAttribute() {
+        return null;
+      },
+      querySelector() {
+        return null;
+      },
+      getBoundingClientRect() {
+        return { width: 120, height: 24 };
+      },
+      textContent: 'Your ChatGPT code is ******',
+    },
+  };
+
+  const code = await hooks.readCodeFromMailRow(row, 7);
+
+  assert.equal(code, null);
+  assert.equal(context.location.href, 'https://tmailor.com/');
+  assert.equal(sleepCalls.reduce((sum, value) => sum + value, 0), 4200);
+});
+
 test('tmailor handlePollEmail can resume on the mail detail page after reinjection, return home, and continue polling step 7', async () => {
   const context = createContext();
   const state = context.__state;

@@ -1313,8 +1313,31 @@ function shouldReturnToMailboxHomeAfterOpeningDetail(step) {
   return step === 7;
 }
 
+async function waitForMailDetailUrl(timeoutMs = 2000, intervalMs = 100) {
+  if (/emailid=/i.test(location.href)) {
+    return true;
+  }
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    throwIfStopped();
+    await sleep(Math.min(intervalMs, Math.max(0, timeoutMs - (Date.now() - start))));
+    if (/emailid=/i.test(location.href)) {
+      return true;
+    }
+  }
+
+  return /emailid=/i.test(location.href);
+}
+
 async function returnToMailboxHomePageFromDetail() {
-  await sleepWithMailboxPatrol(3000, { reason: 'leaving the login email detail view before returning home' });
+  const detailUrlDetected = await waitForMailDetailUrl(2000, 100);
+  if (detailUrlDetected) {
+    log('TMailor: Mail detail URL detected. Waiting briefly, then navigating back to the mailbox home page.', 'info');
+    await sleepWithMailboxPatrol(2000, { reason: 'leaving the login email detail view before returning home' });
+  } else {
+    log('TMailor: Mail detail URL did not settle in time. Navigating back to the mailbox home page directly.', 'info');
+  }
   location.href = 'https://tmailor.com/';
   await sleepWithMailboxPatrol(1200, { reason: 'returning to the mailbox home page' });
 }

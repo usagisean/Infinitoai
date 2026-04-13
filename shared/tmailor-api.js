@@ -71,6 +71,10 @@
     return 'TMailor API triggered a Cloudflare captcha.';
   };
 
+  const addTmailorApiNodeRetryHint = TmailorErrors?.addTmailorApiNodeRetryHint || function(message) {
+    return String(message || '').trim();
+  };
+
   const getStepMailMatchProfile = MailMatching?.getStepMailMatchProfile || function() {
     return null;
   };
@@ -108,7 +112,7 @@
   }
 
   function createTimeoutError(message) {
-    const error = new Error(message);
+    const error = new Error(addTmailorApiNodeRetryHint(message));
     error.name = 'TimeoutError';
     return error;
   }
@@ -153,7 +157,7 @@
     }
 
     if (!response.ok) {
-      throw new Error('TMailor API request failed (' + response.status + ').');
+      throw new Error(addTmailorApiNodeRetryHint('TMailor API request failed (' + response.status + ').'));
     }
 
     if (!json || typeof json !== 'object') {
@@ -200,7 +204,7 @@
     });
 
     if (!response.ok) {
-      throw new Error('TMailor homepage request failed (' + response.status + ').');
+      throw new Error(addTmailorApiNodeRetryHint('TMailor homepage request failed (' + response.status + ').'));
     }
   }
 
