@@ -9,12 +9,12 @@
 
 (function() {
 if (window.__MULTIPAGE_MAIL_163_LOADED) {
-  console.log('[MultiPage:mail-163] Content script already loaded on', location.href);
+  console.log('[Infinito.AI:mail-163] Content script already loaded on', location.href);
   return;
 }
 window.__MULTIPAGE_MAIL_163_LOADED = true;
 
-const MAIL163_PREFIX = '[MultiPage:mail-163]';
+const MAIL163_PREFIX = '[Infinito.AI:mail-163]';
 const isTopFrame = window === window.top;
 const { getStepMailMatchProfile, matchesSubjectPatterns } = MailMatching;
 const { isMailFresh, parseMailTimestampCandidates } = MailFreshness;

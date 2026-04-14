@@ -6,12 +6,12 @@
 
 (function() {
 if (window.__MULTIPAGE_INBUCKET_MAIL_LOADED) {
-  console.log('[MultiPage:inbucket-mail] Content script already loaded on', location.href);
+  console.log('[Infinito.AI:inbucket-mail] Content script already loaded on', location.href);
   return;
 }
 window.__MULTIPAGE_INBUCKET_MAIL_LOADED = true;
 
-const INBUCKET_PREFIX = '[MultiPage:inbucket-mail]';
+const INBUCKET_PREFIX = '[Infinito.AI:inbucket-mail]';
 const isTopFrame = window === window.top;
 const SEEN_MAIL_IDS_KEY = 'seenInbucketMailIds';
 const { getStepMailMatchProfile, matchesSubjectPatterns } = MailMatching;
