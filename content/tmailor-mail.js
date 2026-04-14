@@ -406,6 +406,39 @@ function getCurrentMailboxInputValue() {
   return input ? String(input.value || input.getAttribute?.('value') || '').trim() : '';
 }
 
+function getPostConfirmMailboxRecoveryState() {
+  const challengeTextVisible = hasCloudflareChallengeText();
+  const currentEmailInput = getCurrentMailboxInput();
+  const currentEmailValue = getCurrentMailboxInputValue();
+  const newEmailButton = findNewEmailButton();
+  const refreshButton = findRefreshInboxButton();
+  const mailboxInputReady = Boolean(currentEmailInput && !currentEmailInput.disabled);
+  const hasMailboxEmail = Boolean(currentEmailValue && EMAIL_REGEX.test(currentEmailValue));
+  const controlsReady = Boolean(newEmailButton || refreshButton);
+  const recovered = !challengeTextVisible && mailboxInputReady && (controlsReady || hasMailboxEmail);
+
+  return {
+    recovered,
+    challengeTextVisible,
+    mailboxInputReady,
+    hasMailboxEmail,
+    controlsReady,
+    currentEmailValue,
+    newEmailButton,
+    refreshButton,
+  };
+}
+
+function describePostConfirmMailboxRecoveryState(state) {
+  return [
+    `challengeTextVisible=${state.challengeTextVisible}`,
+    `mailboxInputReady=${state.mailboxInputReady}`,
+    `hasMailboxEmail=${state.hasMailboxEmail}`,
+    `controlsReady=${state.controlsReady}`,
+    `email=${state.currentEmailValue || 'none'}`,
+  ].join('; ');
+}
+
 function detectTmailorPageState() {
   if (isFatalMailboxErrorVisible()) {
     return {
@@ -945,6 +978,10 @@ async function dismissBlockingOverlay(timeoutMs = 4000) {
 async function ensureCloudflareChallengeClearedOrThrow(timeoutMs = DEFAULT_CLOUDFLARE_TIMEOUT_MS) {
   const start = Date.now();
   const observeBeforeCheckboxMs = 5000;
+  const postConfirmProbeMs = Math.max(2500, Math.min(12000, Math.max(timeoutMs, 4000)));
+  const postConfirmRetryDelayMs = postConfirmProbeMs >= 11000
+    ? 8000
+    : Math.max(0, postConfirmProbeMs - 3000);
   if (!isCloudflareChallengeVisible()) {
     return false;
   }
@@ -959,21 +996,54 @@ async function ensureCloudflareChallengeClearedOrThrow(timeoutMs = DEFAULT_CLOUD
       return true;
     }
 
-    const elapsed = Date.now() - start;
-    const remainingBudget = Math.max(0, timeoutMs - elapsed);
-    const postConfirmGraceMs = Math.min(5000, Math.max(2500, remainingBudget));
     const graceStart = Date.now();
-    log(`TMailor: Cloudflare verification was submitted. Waiting up to ${postConfirmGraceMs}ms for the challenge shell to disappear...`, 'info');
-    while (Date.now() - graceStart < postConfirmGraceMs) {
+    let retriedConfirm = false;
+    log(`TMailor: Cloudflare verification was submitted. Probing mailbox recovery for up to ${postConfirmProbeMs}ms before manual takeover...`, 'info');
+    while (Date.now() - graceStart < postConfirmProbeMs) {
       throwIfStopped();
       if (!isCloudflareChallengeVisible()) {
         log('TMailor: Cloudflare challenge cleared during the post-confirm grace window', 'ok');
         return true;
       }
+
+      const recoveryState = getPostConfirmMailboxRecoveryState();
+      if (recoveryState.recovered) {
+        log(
+          `TMailor: Mailbox controls recovered after Confirm even though the challenge shell is still mounted (${describePostConfirmMailboxRecoveryState(recoveryState)}). Treating the challenge as cleared.`,
+          'ok'
+        );
+        return true;
+      }
+
+      if (!retriedConfirm && postConfirmRetryDelayMs > 0 && Date.now() - graceStart >= postConfirmRetryDelayMs) {
+        const responseTokenLength = getCloudflareResponseTokenLength();
+        const confirmButton = findCloudflareConfirmButton();
+        if (responseTokenLength > 0 && confirmButton && !isElementDisabled(confirmButton)) {
+          retriedConfirm = true;
+          log(
+            `TMailor: Post-confirm probe reached ${postConfirmRetryDelayMs}ms without mailbox recovery. Token still exists, so retrying Confirm once (${describeElementForLog(confirmButton, 'confirm')}).`,
+            'warn'
+          );
+          simulateClick(confirmButton);
+          await sleep(1200);
+          continue;
+        }
+      }
+
       await sleep(250);
     }
+
     if (!isCloudflareChallengeVisible()) {
       log('TMailor: Cloudflare challenge cleared during the post-confirm grace window', 'ok');
+      return true;
+    }
+
+    const recoveryState = getPostConfirmMailboxRecoveryState();
+    if (recoveryState.recovered) {
+      log(
+        `TMailor: Mailbox controls recovered after Confirm even though the challenge shell is still mounted (${describePostConfirmMailboxRecoveryState(recoveryState)}). Treating the challenge as cleared.`,
+        'ok'
+      );
       return true;
     }
   }

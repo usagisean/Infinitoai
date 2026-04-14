@@ -4032,6 +4032,286 @@ test('tmailor default Cloudflare timeout allows a token that appears after 13 se
   assert.equal(state.lastClicked?.id, 'btnNewEmailForm');
 });
 
+test('tmailor treats restored mailbox controls as success even when the turnstile shell lingers after Confirm', async () => {
+  const context = createContext();
+  const state = context.__state;
+  let now = 0;
+  let responseToken = '';
+  let confirmClickedAt = null;
+  context.Date = class extends Date {
+    static now() {
+      return now;
+    }
+  };
+
+  const turnstileContainer = {
+    tagName: 'DIV',
+    className: 'cf-turnstile h-[80px] flex items-center justify-center',
+    getBoundingClientRect() {
+      return { left: 157, top: 570, width: 300, height: 80 };
+    },
+  };
+  const confirmButton = {
+    id: 'btnNewEmailForm',
+    tagName: 'BUTTON',
+    textContent: 'Confirm',
+    disabled: false,
+    getAttribute(name) {
+      if (name === 'aria-disabled') return 'false';
+      return null;
+    },
+    getBoundingClientRect() {
+      return { left: 246, top: 662, width: 122, height: 41 };
+    },
+  };
+  const currentEmailInput = {
+    value: 'oldbox@libinit.com',
+    disabled: false,
+    getAttribute(name) {
+      if (name === 'aria-label') return 'Your Temp Mail Address';
+      if (name === 'value') return this.value;
+      return null;
+    },
+    getBoundingClientRect() {
+      return { left: 17, top: 532, width: 581, height: 64 };
+    },
+  };
+  const newEmailButton = {
+    id: 'btnNewEmail',
+    tagName: 'BUTTON',
+    textContent: 'New Email',
+    getBoundingClientRect() {
+      return { left: 286, top: 488, width: 110, height: 40 };
+    },
+  };
+  const refreshButton = {
+    id: 'refresh-inboxs',
+    tagName: 'BUTTON',
+    textContent: 'Refresh',
+    getBoundingClientRect() {
+      return { left: 420, top: 488, width: 96, height: 40 };
+    },
+  };
+
+  function mailboxRecovered() {
+    return confirmClickedAt != null && now - confirmClickedAt >= 3000;
+  }
+
+  context.document.body = {
+    get innerText() {
+      if (mailboxRecovered()) {
+        return 'Your Temp Mail Address New Email Refresh';
+      }
+      return 'Please verify that you are not a robot. Confirm';
+    },
+    set innerText(value) {
+      state.bodyText = value;
+    },
+  };
+  context.document.querySelector = (selector) => {
+    if (selector === '#btnNewEmailForm') {
+      return confirmButton;
+    }
+    if (selector === '#btnNewEmail') {
+      return mailboxRecovered() ? newEmailButton : null;
+    }
+    if (selector === '#refresh-inboxs') {
+      return mailboxRecovered() ? refreshButton : null;
+    }
+    if (selector === 'input[name="currentEmailAddress"]') {
+      return currentEmailInput;
+    }
+    if (selector === '.cf-turnstile' || selector.includes('.cf-turnstile') || selector.includes('.html-captcha')) {
+      return turnstileContainer;
+    }
+    if (selector.includes('input[name="cf-turnstile-response"]')) {
+      return responseToken ? { value: responseToken } : { value: '' };
+    }
+    return null;
+  };
+  context.document.querySelectorAll = (selector) => {
+    if (selector === 'button, [role="button"], a, summary') {
+      const controls = [confirmButton];
+      if (mailboxRecovered()) {
+        controls.push(newEmailButton, refreshButton);
+      }
+      return controls;
+    }
+    if (selector === 'input, textarea') {
+      return [currentEmailInput];
+    }
+    return [];
+  };
+  context.chrome.runtime.sendMessage = (message, callback) => {
+    state.runtimeMessages = state.runtimeMessages || [];
+    state.runtimeMessages.push(message);
+    if (message.type === 'DEBUGGER_CLICK_AT') {
+      responseToken = 'verified-token';
+    }
+    const response = { ok: true };
+    if (typeof callback === 'function') {
+      callback(response);
+    }
+    return Promise.resolve(response);
+  };
+  context.simulateClick = (target) => {
+    state.clicked += 1;
+    state.lastClicked = target;
+    if (target === confirmButton) {
+      confirmClickedAt = now;
+      responseToken = 'verified-token';
+      currentEmailInput.value = 'freshbox@libinit.com';
+    }
+  };
+  context.sleep = async (ms = 0) => {
+    now += ms;
+  };
+
+  loadTmailorScript(context);
+  const hooks = context.__MULTIPAGE_TMAILOR_TEST_HOOKS;
+  assert.ok(hooks?.ensureCloudflareChallengeClearedOrThrow, 'expected tmailor to expose ensureCloudflareChallengeClearedOrThrow');
+
+  const cleared = await hooks.ensureCloudflareChallengeClearedOrThrow(12000);
+
+  assert.equal(cleared, true);
+  assert.equal(state.lastClicked?.id, 'btnNewEmailForm');
+});
+
+test('tmailor retries Confirm once after 8 seconds when the token persists but the mailbox still has not recovered', async () => {
+  const context = createContext();
+  const state = context.__state;
+  let now = 0;
+  let responseToken = '';
+  let confirmClickCount = 0;
+  let secondConfirmAt = null;
+  context.Date = class extends Date {
+    static now() {
+      return now;
+    }
+  };
+
+  const turnstileContainer = {
+    tagName: 'DIV',
+    className: 'cf-turnstile h-[80px] flex items-center justify-center',
+    getBoundingClientRect() {
+      return { left: 157, top: 570, width: 300, height: 80 };
+    },
+  };
+  const confirmButton = {
+    id: 'btnNewEmailForm',
+    tagName: 'BUTTON',
+    textContent: 'Confirm',
+    disabled: false,
+    getAttribute(name) {
+      if (name === 'aria-disabled') return 'false';
+      return null;
+    },
+    getBoundingClientRect() {
+      return { left: 246, top: 662, width: 122, height: 41 };
+    },
+  };
+  const currentEmailInput = {
+    value: 'oldbox@libinit.com',
+    disabled: false,
+    getAttribute(name) {
+      if (name === 'aria-label') return 'Your Temp Mail Address';
+      if (name === 'value') return this.value;
+      return null;
+    },
+    getBoundingClientRect() {
+      return { left: 17, top: 532, width: 581, height: 64 };
+    },
+  };
+  const newEmailButton = {
+    id: 'btnNewEmail',
+    tagName: 'BUTTON',
+    textContent: 'New Email',
+    getBoundingClientRect() {
+      return { left: 286, top: 488, width: 110, height: 40 };
+    },
+  };
+
+  function mailboxRecovered() {
+    return confirmClickCount >= 2 && secondConfirmAt != null && now - secondConfirmAt >= 1000;
+  }
+
+  context.document.body = {
+    get innerText() {
+      if (mailboxRecovered()) {
+        return 'Your Temp Mail Address New Email';
+      }
+      return 'Please verify that you are not a robot. Confirm';
+    },
+    set innerText(value) {
+      state.bodyText = value;
+    },
+  };
+  context.document.querySelector = (selector) => {
+    if (selector === '#btnNewEmailForm') {
+      return confirmButton;
+    }
+    if (selector === '#btnNewEmail') {
+      return mailboxRecovered() ? newEmailButton : null;
+    }
+    if (selector === 'input[name="currentEmailAddress"]') {
+      return currentEmailInput;
+    }
+    if (selector === '.cf-turnstile' || selector.includes('.cf-turnstile') || selector.includes('.html-captcha')) {
+      return turnstileContainer;
+    }
+    if (selector.includes('input[name="cf-turnstile-response"]')) {
+      return responseToken ? { value: responseToken } : { value: '' };
+    }
+    return null;
+  };
+  context.document.querySelectorAll = (selector) => {
+    if (selector === 'button, [role="button"], a, summary') {
+      return mailboxRecovered() ? [confirmButton, newEmailButton] : [confirmButton];
+    }
+    if (selector === 'input, textarea') {
+      return [currentEmailInput];
+    }
+    return [];
+  };
+  context.chrome.runtime.sendMessage = (message, callback) => {
+    state.runtimeMessages = state.runtimeMessages || [];
+    state.runtimeMessages.push(message);
+    if (message.type === 'DEBUGGER_CLICK_AT') {
+      responseToken = 'verified-token';
+    }
+    const response = { ok: true };
+    if (typeof callback === 'function') {
+      callback(response);
+    }
+    return Promise.resolve(response);
+  };
+  context.simulateClick = (target) => {
+    state.clicked += 1;
+    state.lastClicked = target;
+    if (target === confirmButton) {
+      confirmClickCount += 1;
+      responseToken = 'verified-token';
+      if (confirmClickCount === 2) {
+        secondConfirmAt = now;
+        currentEmailInput.value = 'secondpass@libinit.com';
+      }
+    }
+  };
+  context.sleep = async (ms = 0) => {
+    now += ms;
+  };
+
+  loadTmailorScript(context);
+  const hooks = context.__MULTIPAGE_TMAILOR_TEST_HOOKS;
+  assert.ok(hooks?.ensureCloudflareChallengeClearedOrThrow, 'expected tmailor to expose ensureCloudflareChallengeClearedOrThrow');
+
+  const cleared = await hooks.ensureCloudflareChallengeClearedOrThrow(18000);
+
+  assert.equal(cleared, true);
+  assert.equal(confirmClickCount, 2);
+  assert.ok(secondConfirmAt >= 8000, `expected the second Confirm after at least 8s, got ${secondConfirmAt}`);
+});
+
 test('tmailor asks background to reload the mailbox instead of self-refreshing during generation recovery', async () => {
   const context = createContext();
   const state = context.__state;
