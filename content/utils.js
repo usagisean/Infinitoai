@@ -19,7 +19,7 @@ var SCRIPT_SOURCE = (() => {
   return 'vps-panel';
 })();
 
-var LOG_PREFIX = `[Infinito.AI:${SCRIPT_SOURCE}]`;
+var LOG_PREFIX = `[Infinitoai:${SCRIPT_SOURCE}]`;
 var STOP_ERROR_MESSAGE = 'Flow stopped by user.';
 
 if (!__MULTIPAGE_UTILS_STATE.stopListenerRegistered) {

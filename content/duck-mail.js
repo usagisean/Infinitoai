@@ -2,12 +2,12 @@
 
 (function() {
 if (window.__MULTIPAGE_DUCK_MAIL_LOADED) {
-  console.log('[Infinito.AI:duck-mail] Content script already loaded on', location.href);
+  console.log('[Infinitoai:duck-mail] Content script already loaded on', location.href);
   return;
 }
 window.__MULTIPAGE_DUCK_MAIL_LOADED = true;
 
-console.log('[Infinito.AI:duck-mail] Content script loaded on', location.href);
+console.log('[Infinitoai:duck-mail] Content script loaded on', location.href);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type !== 'FETCH_DUCK_EMAIL') return;
