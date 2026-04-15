@@ -271,6 +271,7 @@ const DEFAULT_STATE = {
     status: 'idle',
     message: 'TMailor API not checked yet.',
   },
+  autoRunPauseWatchdog: null,
   mailProviderUsage: {
     '163': [],
     qq: [],
@@ -1372,6 +1373,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true; // async response
 });
+
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm?.name !== getAutoRunPauseWatchdogAlarmName()) {
+      return;
+    }
+
+    handlePersistentAutoRunPauseWatchdogAlarm().catch((err) => {
+      console.error(LOG_PREFIX, 'Persistent auto-run pause watchdog failed:', err);
+    });
+  });
+}
+
+async function handlePersistentAutoRunPauseWatchdogAlarm() {
+  const state = await getState();
+  const context = getNormalizedAutoRunPauseWatchdogContext(state.autoRunPauseWatchdog);
+  if (!context || !shouldUsePersistentAutoRunPauseWatchdog({
+    phase: context.phase,
+    infiniteMode: context.infiniteMode,
+  })) {
+    await clearPersistentAutoRunPauseWatchdog();
+    return;
+  }
+
+  if (!state.autoRunning) {
+    await clearPersistentAutoRunPauseWatchdog();
+    return;
+  }
+
+  if (context.deadlineAt > Date.now() + 250) {
+    if (chrome.alarms?.create) {
+      await chrome.alarms.create(getAutoRunPauseWatchdogAlarmName(), { when: context.deadlineAt });
+    }
+    return;
+  }
+
+  const { error, lastLogEntry } = buildPausedAutoRunWatchdogError(state, context);
+
+  if (resumeWaiter) {
+    const waiter = resumeWaiter;
+    resumeWaiter = null;
+    await clearPersistentAutoRunPauseWatchdog();
+    waiter.reject(error);
+    return;
+  }
+
+  await finalizePersistentAutoRunPauseWatchdogTimeout(error, state, context, lastLogEntry);
+}
 
 async function handleMessage(message, sender) {
   switch (message.type) {
