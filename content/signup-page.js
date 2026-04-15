@@ -533,8 +533,14 @@ async function step3_fillEmailPassword(payload) {
 
   const inlineCredentialChoice = findStep3ImmediateCredentialChoice();
   if (inlineCredentialChoice?.passwordInput) {
+    if (isSignupFlowUnexpectedlyOnLoginPasswordPage()) {
+      log('Step 3: Signup flow fell back to the existing-account login password page. Preserving the current email/password and continuing with the login flow instead of requesting a signup code.', 'warn');
+      reportComplete(3, { email, existingAccountLogin: true });
+      return;
+    }
     log('Step 3: Password field is already visible on the same page. Filling password before the first continue click...');
-    await submitStep3WithPassword(payload, inlineCredentialChoice.passwordInput);
+    const submissionStartUrl = await submitStep3WithPassword(payload, inlineCredentialChoice.passwordInput);
+    await waitForStep3CredentialSubmissionOutcome(submissionStartUrl);
     reportComplete(3, { email });
     return;
   }
@@ -575,9 +581,21 @@ async function step3_fillEmailPassword(payload) {
     throw new Error('Could not find passwordless-login button or password input after submitting email. URL: ' + location.href);
   }
 
+  if (isSignupFlowUnexpectedlyOnLoginPasswordPage()) {
+    log('Step 3: Email submit landed on the existing-account login password page. Preserving the current email/password and continuing with the login flow instead of requesting a signup code.', 'warn');
+    reportComplete(3, { email, existingAccountLogin: true });
+    return;
+  }
+
   if (!payload.password) throw new Error('No password provided. Step 3 requires a generated password.');
-  await submitStep3WithPassword(payload, passwordInput);
+  const submissionStartUrl = await submitStep3WithPassword(payload, passwordInput);
+  await waitForStep3CredentialSubmissionOutcome(submissionStartUrl);
   reportComplete(3, { email });
+}
+
+function isSignupFlowUnexpectedlyOnLoginPasswordPage() {
+  return /(?:auth|accounts)\.openai\.com\/log-?in\/password/i.test(location.href)
+    && Boolean(findVisiblePasswordInput());
 }
 
 function throwIfAuthOperationTimedOut(step, text = getVisiblePageText()) {
@@ -941,6 +959,7 @@ async function submitStep3WithPassword(payload, passwordInput) {
   log(`Step 3: Password filled: ${payload.password}`);
 
   await sleep(500);
+  const submissionStartUrl = location.href;
   const passwordSubmitBtn = document.querySelector('button[type="submit"]')
     || await waitForElementByText('button', /continue|sign\s*up|submit|注册|创建|create|继续/i, 5000).catch(() => null);
 
@@ -948,7 +967,70 @@ async function submitStep3WithPassword(payload, passwordInput) {
     await humanPause(500, 1300);
     simulateClick(passwordSubmitBtn);
     log('Step 3: Form submitted');
+    return submissionStartUrl;
   }
+
+  if (submitStep3PasswordWithFallback(passwordInput)) {
+    log('Step 3: Submit button did not appear after password entry. Submitted the form via a fallback Enter key sequence.', 'warn');
+    return submissionStartUrl;
+  }
+
+  throw new Error('Step 3 blocked: password was filled but no submit action was available on the signup form. URL: ' + location.href);
+}
+
+function submitStep3PasswordWithFallback(passwordInput) {
+  const form = passwordInput?.form || passwordInput?.closest?.('form') || null;
+
+  if (form?.requestSubmit) {
+    form.requestSubmit();
+    return true;
+  }
+
+  if (form?.submit) {
+    form.submit();
+    return true;
+  }
+
+  if (!passwordInput?.dispatchEvent) {
+    return false;
+  }
+
+  passwordInput.focus?.();
+  passwordInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+  passwordInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+  passwordInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+  return true;
+}
+
+async function waitForStep3CredentialSubmissionOutcome(startUrl, timeout = 8000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+
+    const visibleText = getVisiblePageText();
+    throwIfAuthOperationTimedOut(3, visibleText);
+    if (isAuthFatalErrorText(visibleText)) {
+      throw new Error('Auth fatal error page detected after step 3 password submit.');
+    }
+    if (isPhoneVerificationRequiredText(visibleText)) {
+      throw new Error(getPhoneVerificationBlockedMessage(3));
+    }
+    if (isUnsupportedEmailBlockingStep(3) && isUnsupportedEmailText(visibleText)) {
+      throw new Error(getUnsupportedEmailBlockedMessage(3));
+    }
+
+    if (location.href !== startUrl || hasVisibleVerificationInput() || hasVisibleProfileFormInput() || !hasVisibleCredentialInput()) {
+      return {
+        accepted: true,
+        reason: 'page-advanced',
+      };
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error('Step 3 blocked: password was filled but the signup page never advanced past the credential form.');
 }
 
 function findPasswordlessLoginButton() {
