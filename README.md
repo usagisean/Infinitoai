@@ -1,6 +1,6 @@
 ## 致谢 Linux.do
 交流QQ群：1059083871
-致谢原作者可以给原作者star，我不需要的，fork放在这里只是想和一些志同道合的朋友交流
+致谢原作者可以给原作者star，我不需要的，fork放在这里是防止原仓库失联并且和一些志同道合的朋友交流
 https://github.com/Logan66666/Infinitoai
 # Infinitoai
 
