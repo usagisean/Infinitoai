@@ -27,7 +27,6 @@ const stepsProgress = document.getElementById('steps-progress');
 const btnAutoRun = document.getElementById('btn-auto-run');
 const autoContinueBar = document.getElementById('auto-continue-bar');
 const autoContinueHint = document.getElementById('auto-continue-hint');
-const btnClearLog = document.getElementById('btn-clear-log');
 const btnLogRoundPrev = document.getElementById('btn-log-round-prev');
 const btnLogRoundNext = document.getElementById('btn-log-round-next');
 const displayLogRound = document.getElementById('display-log-round');
@@ -1225,17 +1224,6 @@ btnReset.addEventListener('click', async () => {
     updateProgressCounter();
     updateRunModeUI();
   }
-});
-
-// Clear log
-btnClearLog.addEventListener('click', async () => {
-  const response = await chrome.runtime.sendMessage({ type: 'CLEAR_LOG_HISTORY', source: 'sidepanel' });
-  if (response?.logRounds) {
-    followLatestLogRound = true;
-    setLogHistory(response.logRounds, response.currentLogRoundId);
-    return;
-  }
-  clearLogArea();
 });
 
 if (btnLogRoundPrev) {

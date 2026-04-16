@@ -42,12 +42,14 @@ test('paste-and-validate clears the current email field before picking the next 
   );
 });
 
-test('side panel exposes log round navigation controls next to the clear button', () => {
+test('side panel exposes log round navigation controls without a clear button', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'sidepanel', 'sidepanel.html'), 'utf8');
+  const source = readSidepanelSource();
 
-  assert.match(html, /id="btn-clear-log"[\s\S]*id="btn-log-round-prev"/);
+  assert.doesNotMatch(html, /id="btn-clear-log"/);
   assert.match(html, /id="btn-log-round-next"/);
   assert.match(html, /id="display-log-round"/);
+  assert.doesNotMatch(source, /btnClearLog/);
 });
 
 test('side panel restores and updates preserved log rounds instead of clearing the console every auto-run reset', () => {

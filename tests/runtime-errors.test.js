@@ -5,7 +5,10 @@ const {
   buildMailPollRecoveryPlan,
   isMessageChannelClosedError,
   isReceivingEndMissingError,
+  shouldRetryStep1WithFreshVpsPanel,
+  shouldRetryStep3WithPlatformLoginRefresh,
   shouldRetryStep3WithFreshOauth,
+  shouldRetryStep6WithFreshOauth,
   shouldRetryStep8WithFreshOauth,
 } = require('../shared/runtime-errors.js');
 
@@ -56,7 +59,76 @@ test('step 3 oauth timeout errors trigger a fresh oauth retry plan', () => {
     true
   );
   assert.equal(
+    shouldRetryStep3WithFreshOauth('Step 3 failed: Could not find email input field on signup page. URL: https://auth.openai.com/sign-in-with-chatgpt/codex/consent'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep3WithFreshOauth('Step 3 failed: Could not find email input field on signup page. URL: https://platform.openai.com/signup'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep3WithFreshOauth('Step 3 failed: Could not find passwordless-login button or password input after submitting email. URL: https://auth.openai.com/u/login/password'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep3WithFreshOauth('Step 3 blocked: password was filled but the signup page never advanced past the credential form.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep3WithFreshOauth('Step 3 blocked: auth issue page offered a "return home" recovery link. Reopen the platform login page and retry with the same email and password.'),
+    true
+  );
+  assert.equal(
     shouldRetryStep3WithFreshOauth('Step 3 failed: Could not find email input field on signup page.'),
+    false
+  );
+});
+
+test('step 3 platform-login stall errors trigger the dedicated platform refresh retry plan', () => {
+  assert.equal(
+    shouldRetryStep3WithPlatformLoginRefresh('Step 3 failed: Could not find passwordless-login button or password input after submitting email. URL: https://platform.openai.com/login'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep3WithPlatformLoginRefresh('Step 3 failed: Could not find email input field on signup page. URL: https://platform.openai.com/login'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep3WithPlatformLoginRefresh('Step 3 failed: Could not find passwordless-login button or password input after submitting email. URL: https://auth.openai.com/u/login/password'),
+    false
+  );
+});
+
+test('step 1 panel load errors trigger a fresh vps-panel retry plan', () => {
+  assert.equal(
+    shouldRetryStep1WithFreshVpsPanel('Step 1 failed: Found Codex OAuth card but no login button inside it. URL: https://panel.example.com/oauth'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep1WithFreshVpsPanel('Step 1 failed: Auth URL did not appear after clicking login. Check if VPS panel is logged in and Codex service is running. URL: https://panel.example.com/oauth'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep1WithFreshVpsPanel('Step 1 failed: VPS panel returned 502 Bad Gateway.'),
+    false
+  );
+});
+
+test('step 6 auth-page stalls trigger a fresh oauth retry plan', () => {
+  assert.equal(
+    shouldRetryStep6WithFreshOauth('Step 6 failed: Could not find email input on login page. URL: https://auth.openai.com/sign-in-with-chatgpt/codex/consent'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep6WithFreshOauth('Step 6 failed: Login did not advance after password submit. Still on the password page.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep6WithFreshOauth('Step 6 recoverable: auth issue page offered a "return home" recovery link. Refresh the VPS OAuth link and retry with the same email and password.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep6WithFreshOauth('Step 6 failed: Incorrect email address or password.'),
     false
   );
 });
