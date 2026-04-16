@@ -1,7 +1,7 @@
 ## 致谢 Linux.do
+交流QQ群：1059083871
 致谢原作者可以给原作者star，我不需要的，fork放在这里只是想和一些志同道合的朋友交流
 https://github.com/Logan66666/Infinitoai
-交流QQ群：1059083871
 # Infinitoai
 
 一个基于 Chrome Side Panel 的自动化扩展，用来批量跑通 ChatGPT OAuth 注册 / 登录流程，并把邮箱获取、验证码轮询、OAuth 确认、VPS 回调验证串成一条可连续执行的工作流。
