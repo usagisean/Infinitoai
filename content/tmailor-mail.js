@@ -13,6 +13,7 @@ const EMAIL_REGEX = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
 const DEFAULT_CLOUDFLARE_TIMEOUT_MS = 30000;
 const MAX_CLOUDFLARE_CHECKBOX_ATTEMPTS = 12;
 const TMAILOR_SKIP_READY_COUNTDOWN = 25;
+const MAILBOX_PATROL_HEARTBEAT_MS = 15000;
 const CLOUDFLARE_TURNSTILE_HOTSPOTS = [
   { xRatio: 0.12, yOffset: 0 },
   { xRatio: 0.16, yOffset: -6 },
@@ -211,6 +212,9 @@ async function sleepWithMailboxPatrol(durationMs, options = {}) {
   }
 
   const sliceMs = Math.max(50, Number.isFinite(options.sliceMs) ? options.sliceMs : 250);
+  const reason = String(options.reason || '').trim();
+  const start = Date.now();
+  let nextHeartbeatAt = reason ? MAILBOX_PATROL_HEARTBEAT_MS : Number.POSITIVE_INFINITY;
   let remainingMs = totalMs;
 
   while (remainingMs > 0) {
@@ -220,6 +224,16 @@ async function sleepWithMailboxPatrol(durationMs, options = {}) {
     remainingMs -= chunkMs;
 
     await runMailboxInterruptionSweep(options);
+
+    if (reason) {
+      const elapsedMs = Math.max(0, Date.now() - start);
+      if (elapsedMs >= nextHeartbeatAt) {
+        log(`TMailor: Still ${reason} (${Math.round(elapsedMs / 1000)}s elapsed)`, 'info');
+        while (elapsedMs >= nextHeartbeatAt) {
+          nextHeartbeatAt += MAILBOX_PATROL_HEARTBEAT_MS;
+        }
+      }
+    }
   }
 }
 
@@ -2073,6 +2087,7 @@ window.__MULTIPAGE_TMAILOR_TEST_HOOKS = {
   getCloudflareCheckboxRect,
   parseMailRow,
   runMailboxInterruptionSweep,
+  sleepWithMailboxPatrol,
   waitForCloudflareConfirm,
   waitForMailboxControls,
 };

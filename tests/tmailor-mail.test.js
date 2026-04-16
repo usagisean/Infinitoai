@@ -2461,6 +2461,34 @@ test('tmailor can use a visual-success fallback to click Confirm after 5 seconds
   );
 });
 
+test('tmailor emits a heartbeat log while mailbox patrol waits for a long generation window', async () => {
+  const context = createContext();
+  const state = context.__state;
+  let now = 0;
+
+  context.Date = class extends Date {
+    static now() {
+      return now;
+    }
+  };
+  context.sleep = async (ms = 0) => {
+    now += ms;
+  };
+
+  loadTmailorScript(context);
+  const hooks = context.__MULTIPAGE_TMAILOR_TEST_HOOKS;
+  assert.ok(hooks?.sleepWithMailboxPatrol, 'expected tmailor to expose sleepWithMailboxPatrol');
+
+  await hooks.sleepWithMailboxPatrol(31000, {
+    reason: 'waiting for the new mailbox to generate',
+  });
+
+  assert.ok(
+    state.logs.some((entry) => /Still waiting for the new mailbox to generate/i.test(entry.message)),
+    'expected a heartbeat log while the mailbox patrol keeps waiting'
+  );
+});
+
 test('tmailor waits for an auto-verifying challenge to turn into visual success before clicking Confirm without touching the checkbox', async () => {
   const context = createContext();
   const state = context.__state;
