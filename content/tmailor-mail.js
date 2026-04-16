@@ -14,6 +14,7 @@ const DEFAULT_CLOUDFLARE_TIMEOUT_MS = 30000;
 const MAX_CLOUDFLARE_CHECKBOX_ATTEMPTS = 12;
 const TMAILOR_SKIP_READY_COUNTDOWN = 25;
 const MAILBOX_PATROL_HEARTBEAT_MS = 15000;
+const CLOUDFLARE_PROGRESS_HEARTBEAT_MS = 10000;
 const CLOUDFLARE_TURNSTILE_HOTSPOTS = [
   { xRatio: 0.12, yOffset: 0 },
   { xRatio: 0.16, yOffset: -6 },
@@ -368,6 +369,14 @@ function hasSoftCloudflareFirewallMessage() {
 function getCloudflareResponseTokenLength() {
   const input = document.querySelector('input[name="cf-turnstile-response"], input[id*="cf-chl-widget"][id$="_response"]');
   return String(input?.value || '').trim().length;
+}
+
+function bumpHeartbeatWindow(nextHeartbeatAt, elapsedMs, intervalMs = CLOUDFLARE_PROGRESS_HEARTBEAT_MS) {
+  let next = Math.max(intervalMs, Number(nextHeartbeatAt) || intervalMs);
+  while (elapsedMs >= next) {
+    next += intervalMs;
+  }
+  return next;
 }
 
 function hasCloudflareVisualSuccessIndicator() {
@@ -996,6 +1005,7 @@ async function ensureCloudflareChallengeClearedOrThrow(timeoutMs = DEFAULT_CLOUD
   const postConfirmRetryDelayMs = postConfirmProbeMs >= 11000
     ? 8000
     : Math.max(0, postConfirmProbeMs - 3000);
+  let nextPostConfirmHeartbeatAt = CLOUDFLARE_PROGRESS_HEARTBEAT_MS;
   if (!isCloudflareChallengeVisible()) {
     return false;
   }
@@ -1015,9 +1025,20 @@ async function ensureCloudflareChallengeClearedOrThrow(timeoutMs = DEFAULT_CLOUD
     log(`TMailor: Cloudflare verification was submitted. Probing mailbox recovery for up to ${postConfirmProbeMs}ms before manual takeover...`, 'info');
     while (Date.now() - graceStart < postConfirmProbeMs) {
       throwIfStopped();
+      const postConfirmElapsedMs = Math.max(0, Date.now() - graceStart);
       if (!isCloudflareChallengeVisible()) {
         log('TMailor: Cloudflare challenge cleared during the post-confirm grace window', 'ok');
         return true;
+      }
+
+      if (postConfirmElapsedMs >= nextPostConfirmHeartbeatAt) {
+        const responseTokenLength = getCloudflareResponseTokenLength();
+        const confirmButton = findCloudflareConfirmButton();
+        log(
+          `TMailor: Cloudflare challenge still blocking the mailbox after Confirm (${Math.round(postConfirmElapsedMs / 1000)}s elapsed; tokenLength=${responseTokenLength}; confirm=${confirmButton ? (isElementDisabled(confirmButton) ? 'disabled' : 'enabled') : 'missing'})`,
+          'info'
+        );
+        nextPostConfirmHeartbeatAt = bumpHeartbeatWindow(nextPostConfirmHeartbeatAt, postConfirmElapsedMs);
       }
 
       const recoveryState = getPostConfirmMailboxRecoveryState();
@@ -1104,6 +1125,7 @@ async function waitForCloudflareConfirm(timeoutMs = DEFAULT_CLOUDFLARE_TIMEOUT_M
   let loggedAutoVerifyingWait = false;
   let sawAutoVerifyingIndicator = false;
   let loggedObserveBeforeCheckbox = false;
+  let nextProgressHeartbeatAt = CLOUDFLARE_PROGRESS_HEARTBEAT_MS;
 
   function hasVerificationCompletionSignal(tokenLength) {
     return Number(tokenLength) > 0;
@@ -1225,6 +1247,7 @@ async function waitForCloudflareConfirm(timeoutMs = DEFAULT_CLOUDFLARE_TIMEOUT_M
     const challengeShellVisible = hasCloudflareChallengeShell();
     const challengeVisible = challengeTextVisible || challengeShellVisible;
     const responseTokenLength = getCloudflareResponseTokenLength();
+    const elapsedMs = Math.max(0, Date.now() - start);
 
     if (!challengeVisible) {
       if (sawChallenge) {
@@ -1431,6 +1454,14 @@ async function waitForCloudflareConfirm(timeoutMs = DEFAULT_CLOUDFLARE_TIMEOUT_M
       confirmButton,
       checkboxCandidate,
     });
+
+    if (elapsedMs >= nextProgressHeartbeatAt) {
+      log(
+        `TMailor: Cloudflare challenge still blocking the mailbox (${Math.round(elapsedMs / 1000)}s elapsed; tokenLength=${responseTokenLength}; confirm=${getConfirmState(confirmButton)}; checkboxAttempts=${checkboxAttemptCount}; confirmAttempts=${confirmAttemptCount})`,
+        'info'
+      );
+      nextProgressHeartbeatAt = bumpHeartbeatWindow(nextProgressHeartbeatAt, elapsedMs);
+    }
 
     if (
       hasAttemptedCheckboxClick

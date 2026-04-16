@@ -2489,6 +2489,84 @@ test('tmailor emits a heartbeat log while mailbox patrol waits for a long genera
   );
 });
 
+test('tmailor emits a heartbeat log while a stable Cloudflare challenge blocks the mailbox', async () => {
+  const context = createContext();
+  const state = context.__state;
+  let now = 0;
+
+  const turnstileContainer = {
+    tagName: 'DIV',
+    className: 'cf-turnstile h-[80px] flex items-center justify-center',
+    getBoundingClientRect() {
+      return { left: 101, top: 472, width: 300, height: 80 };
+    },
+  };
+  const confirmButton = {
+    id: 'btnNewEmailForm',
+    tagName: 'BUTTON',
+    textContent: 'Confirm',
+    disabled: true,
+    getAttribute(name) {
+      if (name === 'aria-disabled') return 'true';
+      return null;
+    },
+    getBoundingClientRect() {
+      return { left: 190, top: 564, width: 123, height: 42 };
+    },
+  };
+
+  context.Date = class extends Date {
+    static now() {
+      return now;
+    }
+  };
+  context.document.body.innerText = 'Please verify that you are not a robot';
+  context.document.querySelector = (selector) => {
+    if (selector === '#btnNewEmailForm') {
+      return confirmButton;
+    }
+    if (
+      selector === '.cf-turnstile'
+      || selector.includes('.cf-turnstile')
+      || selector.includes('.html-captcha')
+    ) {
+      return turnstileContainer;
+    }
+    if (selector.includes('input[name="cf-turnstile-response"]')) {
+      return { value: '' };
+    }
+    return null;
+  };
+  context.document.querySelectorAll = (selector) => {
+    if (selector === 'button, [role="button"], a, summary') {
+      return [confirmButton];
+    }
+    if (selector === 'label, button, div, span') {
+      return [turnstileContainer];
+    }
+    return [];
+  };
+  context.sleep = async (ms = 0) => {
+    state.sleepCalls += 1;
+    now += ms;
+  };
+
+  loadTmailorScript(context);
+
+  const hooks = context.__MULTIPAGE_TMAILOR_TEST_HOOKS;
+  assert.ok(hooks?.ensureCloudflareChallengeClearedOrThrow, 'expected tmailor to expose ensureCloudflareChallengeClearedOrThrow');
+
+  await assert.rejects(
+    hooks.ensureCloudflareChallengeClearedOrThrow(31000),
+    /Cloudflare challenge detected on TMailor/i
+  );
+
+  assert.ok(
+    state.logs.some((entry) => /Cloudflare challenge still blocking the mailbox/i.test(entry.message)),
+    'expected a heartbeat log while the Cloudflare challenge remains stable'
+  );
+});
+
 test('tmailor waits for an auto-verifying challenge to turn into visual success before clicking Confirm without touching the checkbox', async () => {
   const context = createContext();
   const state = context.__state;
