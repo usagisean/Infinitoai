@@ -3197,10 +3197,36 @@ async function executeStep1(state) {
 // Step 2: Open Signup Page (Background opens the platform login entry, signup-page.js continues if needed)
 // ============================================================
 
-async function executeStep2(state) {
+let step2NavigationReplayAttempted = false;
+
+function isStep2PlatformSigningBridgePageState(pageState = {}) {
+  const url = String(pageState?.url || '').trim();
+  if (!/platform\.openai\.com\/(login|home|auth\/callback)/i.test(url)) {
+    return false;
+  }
+
+  return !pageState?.hasVisibleCredentialInput
+    && !pageState?.hasVisibleVerificationInput
+    && !pageState?.hasVisibleProfileFormInput;
+}
+
+async function executeStep2(state, options = {}) {
+  const replayedAfterNavigationInterrupt = Boolean(options?.replayedAfterNavigationInterrupt);
+  if (!replayedAfterNavigationInterrupt) {
+    step2NavigationReplayAttempted = false;
+  }
+
+  if (replayedAfterNavigationInterrupt) {
+    await addLog(
+      'Step 2: Replaying the platform login step after the navigation interrupt left the page on the signing bridge...',
+      'warn'
+    );
+  }
+
   await addLog(`Step 2: Opening platform login page...`);
   await reuseOrCreateTab('signup-page', OFFICIAL_SIGNUP_ENTRY_URL, {
     reuseActiveTabOnCreate: true,
+    reloadIfSameUrl: replayedAfterNavigationInterrupt,
   });
 
   try {
@@ -3227,12 +3253,14 @@ async function executeStep2(state) {
 async function waitForStep2CompletionSignalOrAuthPageReady() {
   const timeoutMs = 15000;
   const start = Date.now();
+  let lastHeartbeatAt = 0;
 
   while (Date.now() - start < timeoutMs) {
     const currentState = await getState();
     const currentStepStatus = currentState?.stepStatuses?.[2];
 
     if (currentStepStatus === 'completed' || currentStepStatus === 'failed' || currentStepStatus === 'stopped') {
+      step2NavigationReplayAttempted = false;
       return;
     }
 
@@ -3248,13 +3276,37 @@ async function waitForStep2CompletionSignalOrAuthPageReady() {
         'Step 2: Auth page is ready after the navigation interrupt. Completing the step from the background fallback.',
         'warn'
       );
+      step2NavigationReplayAttempted = false;
       await setStepStatus(2, 'completed');
       notifyStepComplete(2, { recoveredAfterNavigation: true });
       return;
     }
 
+    const elapsedMs = Date.now() - start;
+    if (isStep2PlatformSigningBridgePageState(pageState)) {
+      if (elapsedMs - lastHeartbeatAt >= 5000) {
+        lastHeartbeatAt = elapsedMs;
+        await addLog(
+          `Step 2: Still waiting for the platform signing bridge to settle after ${Math.max(1, Math.round(elapsedMs / 1000))}s. Current auth URL: ${pageState?.url || 'unknown'}`,
+          'info'
+        );
+      }
+
+      if (!step2NavigationReplayAttempted && elapsedMs >= 3000) {
+        step2NavigationReplayAttempted = true;
+        await addLog(
+          'Step 2: Auth page is still stuck on the platform signing bridge after the navigation interrupt. Replaying step 2 once after reinjection...',
+          'warn'
+        );
+        await executeStep2(currentState, { replayedAfterNavigationInterrupt: true });
+        return;
+      }
+    }
+
     await sleepWithStop(250);
   }
+
+  step2NavigationReplayAttempted = false;
 }
 
 // ============================================================

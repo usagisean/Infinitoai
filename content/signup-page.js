@@ -203,10 +203,12 @@ async function waitForPlatformEntryStateToSettle(timeout = 8000) {
 
   const start = Date.now();
   let sawPlatformRedirect = false;
+  let lastHeartbeatAt = 0;
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
     const visibleText = getVisiblePageText();
+    const elapsedMs = Date.now() - start;
 
     if (await recoverPlatformEntryFromAuthIssueIfNeeded(visibleText)) {
       sawPlatformRedirect = true;
@@ -223,6 +225,13 @@ async function waitForPlatformEntryStateToSettle(timeout = 8000) {
 
     if (isPlatformHomeRedirectPage() || isPlatformAuthCallbackPage() || isPlatformSigningInStateText(visibleText)) {
       sawPlatformRedirect = true;
+      if (elapsedMs - lastHeartbeatAt >= 5000) {
+        lastHeartbeatAt = elapsedMs;
+        log(
+          `Step 2: Platform entry is still waiting on the signing-in bridge after ${Math.max(1, Math.round(elapsedMs / 1000))}s. URL: ${location.href}`,
+          'info'
+        );
+      }
     }
 
     await sleep(250);

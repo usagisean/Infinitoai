@@ -54,7 +54,7 @@ test('step 2 ignores navigation-driven signup page disconnects and keeps waiting
 
   assert.match(
     backgroundSource,
-    /async function executeStep2\(state\) \{[\s\S]*try \{[\s\S]*await sendToContentScript\('signup-page', \{[\s\S]*\}\);[\s\S]*\} catch \(err\) \{[\s\S]*isMessageChannelClosedError\([\s\S]*isReceivingEndMissingError\([\s\S]*waiting for completion signal[\s\S]*throw err;[\s\S]*\}[\s\S]*\}/i
+    /async function executeStep2\(state,\s*options\s*=\s*\{\}\) \{[\s\S]*try \{[\s\S]*await sendToContentScript\('signup-page', \{[\s\S]*\}\);[\s\S]*\} catch \(err\) \{[\s\S]*isMessageChannelClosedError\([\s\S]*isReceivingEndMissingError\([\s\S]*waiting for completion signal[\s\S]*throw err;[\s\S]*\}[\s\S]*\}/i
   );
 });
 
@@ -72,6 +72,24 @@ test('step 2 has an auth-page-ready fallback when the completion signal is lost 
   assert.match(
     backgroundSource,
     /hasVisibleCredentialInput[\s\S]*notifyStepComplete\(2,\s*\{[\s\S]*recoveredAfterNavigation:\s*true[\s\S]*\}\)/i
+  );
+});
+
+test('step 2 navigation fallback replays the signup step when the page is still stuck on the platform signing bridge', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /Step 2: Auth page is still stuck on the platform signing bridge after the navigation interrupt[\s\S]*await executeStep2\(currentState,\s*\{\s*replayedAfterNavigationInterrupt:\s*true\s*\}\);/i
+  );
+});
+
+test('step 2 emits heartbeat logs while waiting for the platform signing bridge to settle', () => {
+  const signupSource = readProjectFile(path.join('content', 'signup-page.js'));
+
+  assert.match(
+    signupSource,
+    /Platform entry is still waiting on the signing-in bridge after/i
   );
 });
 
